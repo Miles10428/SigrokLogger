@@ -2,8 +2,8 @@
  * @file SigrokLogger.cs
  * @brief This file contains the implementation of the SigrokCapture class.
  * @author u10428
- * @version 0.1.0
- * @date 2025-03-19
+ * @version 0.1.1
+ * @date 2025-07-31
  * 
  * @copyright Copyright (c) 2025
  * 
@@ -15,10 +15,16 @@ using System.Threading;
 
 namespace SigrokLogger
 {
+    public class CaptureResult
+    {
+        public string LogPath { get; set; }
+        public bool Success { get; set; }
+        public string ErrorOutput { get; set; }
+    }
     public class SigrokCapture
     {
-        private readonly int _maxAttempts;   // 最大重試次數
-        private readonly int _durationMs;   // 擷取時間長度（毫秒）
+        // private readonly int _maxAttempts;   // 最大重試次數
+        // private readonly int _durationMs;   // 擷取時間長度（毫秒）
         private Thread _captureThread;
         //private bool _stopRequested = false;
         private CancellationTokenSource _cancellationTokenSource;
@@ -31,18 +37,13 @@ namespace SigrokLogger
         private const int DelayMs = 1000;
         //private bool _isInitialized = false;
 
-        // 建構子，讓使用者指定最大重試次數和擷取時間長度
-        public SigrokCapture()
-        {
-            //_maxAttempts = maxAttempts;
-            //_durationMs = durationMs;
-        }
+    
 
         // 新增一個使用Thread的方法來執行擷取
         public void StartCaptureWithThread(int maxAttempts, int durationMs)
         {
-            int attempt = 0;
-            string today = DateTime.Now.ToString("yyyyMMdd");
+            // int attempt = 0;
+            //string today = DateTime.Now.ToString("yyyyMMdd");
 
             // 檢查軟體路徑是否存在
             if (!Directory.Exists(SoftwarePath))
@@ -50,15 +51,12 @@ namespace SigrokLogger
                 throw new DirectoryNotFoundException($"Sigrok軟體路徑不存在: {SoftwarePath}");
             }
 
-            // 檢查並創建日誌目錄
-            if (!Directory.Exists(BaseLogPath+"\\"+today))
-            {
-                Directory.CreateDirectory(BaseLogPath+"\\"+today);
-            }
+
 
             // 重置停止標誌
             //_stopRequested = false;
             // 創建新的 CancellationTokenSource
+            string today = PrepareLogDirectory();
             _cancellationTokenSource = new CancellationTokenSource();
             CancellationToken cancellationToken = _cancellationTokenSource.Token;
 
@@ -76,15 +74,22 @@ namespace SigrokLogger
                 //    attempt++;
                 //    Thread.Sleep(DelayMs);
                 //}
+                int attempt = 0;
+                int failedCount = 0;
                 try
                 {
                     while (attempt < maxAttempts && !cancellationToken.IsCancellationRequested)
                     {
                         string timestamp = DateTime.Now.ToString("HHmmss");
-                        string logPath = Path.Combine(BaseLogPath, today, $"{today}_{timestamp}.sr");
-                        string command = $"sigrok-cli -d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -t DET=r -O srzip -o {logPath}";
+                        string logPath = BuildLogPath(today, timestamp);
+                        string command = BuildCommand(logPath, durationMs);//$"sigrok-cli -d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -t DET=r -O srzip -o {logPath}";
 
-                        ExecuteCommand(command);
+                        var result = ExecuteCommand(command);
+                        if (!result.Success)
+                        {
+                            failedCount++;
+                            Console.WriteLine($"[Attempt {attempt + 1}] Error: {result.ErrorOutput}");
+                        }
                         attempt++;
 
                         // 使用 CancellationToken 的 WaitHandle 來等待
@@ -103,7 +108,11 @@ namespace SigrokLogger
                 catch (Exception ex)
                 {
                     // 捕獲其他異常
-                    Console.WriteLine($"Error in capture thread: {ex.Message}");
+                    Console.WriteLine($"Unexpected error: {ex.Message}");
+                }
+                finally
+                {
+                    Console.WriteLine($"[Capture Completed] Failed {failedCount} times out of {maxAttempts} attempts.");
                 }
             });
 
@@ -139,6 +148,29 @@ namespace SigrokLogger
             return _captureThread != null && _captureThread.IsAlive;
         }
 
+        private string PrepareLogDirectory()
+        {
+            string today = DateTime.Now.ToString("yyyyMMdd");
+            string logDir = Path.Combine(BaseLogPath, today);
+
+            // 檢查並創建日誌目錄
+            if (!Directory.Exists(logDir))
+            {
+                //Directory.CreateDirectory(BaseLogPath + "\\" + today);
+                Directory.CreateDirectory(logDir);
+            }
+            return today;
+        }
+
+        private string BuildLogPath(string today, string timestamp)
+        {
+            return Path.Combine(BaseLogPath, today, $"{today}_{timestamp}.sr");
+        }
+
+        private string BuildCommand(string outputPath, int durationMs)
+        {
+            return $"-d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -t DET=r -O srzip -o \"{outputPath}\"";
+        }
         ////開始執行擷取
         //public void StartCapture()
         //{
@@ -164,47 +196,47 @@ namespace SigrokLogger
         //}
 
         //執行命令的私有方法
-        private void ExecuteCommand(string command)
+        private CaptureResult ExecuteCommand(string command)
         {
-            var processStartInfo = new ProcessStartInfo("cmd.exe")
+            var processStartInfo = new ProcessStartInfo
             {
-                RedirectStandardInput = true,
+                FileName = "sigrok-cli.exe",
+                Arguments = command,
+                WorkingDirectory = SoftwarePath,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = false,
-                Arguments = "/k"
+                CreateNoWindow = true,
             };
 
             using (var process = Process.Start(processStartInfo))
             {
-                if (process != null)
-                {
-                    using (var input = process.StandardInput)
-                    {
-                        if (input.BaseStream.CanWrite)
-                        {
-                            input.WriteLine($"cd {SoftwarePath}");
-                            input.WriteLine(command);
-                            //input.WriteLine("exit");
-                        }
-                    }
+                // if (process != null)
+                // {
+                //     using (var input = process.StandardInput)
+                //     {
+                //         if (input.BaseStream.CanWrite)
+                //         {
+                //             input.WriteLine($"cd {SoftwarePath}");
+                //             input.WriteLine(command);
+                //             //input.WriteLine("exit");
+                //         }
+                //     }
 
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                return new CaptureResult { LogPath = command, Success = process.ExitCode == 0, ErrorOutput = error };
+                //Console.WriteLine("Output:");
+                //Console.WriteLine(output);
 
-                    //Console.WriteLine("Output:");
-                    //Console.WriteLine(output);
+                // if (!string.IsNullOrEmpty(error))
+                // {
+                //     Console.WriteLine("Error:");
+                //     Console.WriteLine(error);
+                // }
 
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        Console.WriteLine("Error:");
-                        Console.WriteLine(error);
-                    }
-
-                    process.WaitForExit();
-                }
-            }
+            };
         }
     }
 }
