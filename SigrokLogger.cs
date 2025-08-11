@@ -2,8 +2,8 @@
  * @file SigrokLogger.cs
  * @brief This file contains the implementation of the SigrokCapture class.
  * @author u10428
- * @version 0.1.1
- * @date 2025-07-31
+ * @version 0.1.2
+ * @date 2025-08-01
  * 
  * @copyright Copyright (c) 2025
  * 
@@ -15,12 +15,12 @@ using System.Threading;
 
 namespace SigrokLogger
 {
-    public class CaptureResult
-    {
-        public string LogPath { get; set; }
-        public bool Success { get; set; }
-        public string ErrorOutput { get; set; }
-    }
+	//public class CaptureResult
+ //   {
+ //       public string LogPath { get; set; }
+ //       public bool Success { get; set; }
+ //       public string ErrorOutput { get; set; }
+ //   }
     public class SigrokCapture
     {
         // private readonly int _maxAttempts;   // 最大重試次數
@@ -37,13 +37,13 @@ namespace SigrokLogger
         private const int DelayMs = 1000;
         //private bool _isInitialized = false;
 
-    
+
 
         // 新增一個使用Thread的方法來執行擷取
-        public void StartCaptureWithThread(int maxAttempts, int durationMs)
+        public void StartCaptureWithThread(int maxAttempts, int durationMs, int step)
         {
             // int attempt = 0;
-            //string today = DateTime.Now.ToString("yyyyMMdd");
+            // string today = DateTime.Now.ToString("yyyyMMdd");
 
             // 檢查軟體路徑是否存在
             if (!Directory.Exists(SoftwarePath))
@@ -56,7 +56,7 @@ namespace SigrokLogger
             // 重置停止標誌
             //_stopRequested = false;
             // 創建新的 CancellationTokenSource
-            string today = PrepareLogDirectory();
+			string today = PrepareLogDirectory();
             _cancellationTokenSource = new CancellationTokenSource();
             CancellationToken cancellationToken = _cancellationTokenSource.Token;
 
@@ -74,22 +74,18 @@ namespace SigrokLogger
                 //    attempt++;
                 //    Thread.Sleep(DelayMs);
                 //}
-                int attempt = 0;
+			    int attempt = 0;
                 int failedCount = 0;
                 try
                 {
                     while (attempt < maxAttempts && !cancellationToken.IsCancellationRequested)
                     {
                         string timestamp = DateTime.Now.ToString("HHmmss");
-                        string logPath = BuildLogPath(today, timestamp);
+                        string logPath = BuildLogPath(today, timestamp, step);
                         string command = BuildCommand(logPath, durationMs);//$"sigrok-cli -d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -t DET=r -O srzip -o {logPath}";
 
-                        var result = ExecuteCommand(command);
-                        if (!result.Success)
-                        {
-                            failedCount++;
-                            Console.WriteLine($"[Attempt {attempt + 1}] Error: {result.ErrorOutput}");
-                        }
+                        ExecuteCommand(command);
+
                         attempt++;
 
                         // 使用 CancellationToken 的 WaitHandle 來等待
@@ -162,14 +158,15 @@ namespace SigrokLogger
             return today;
         }
 
-        private string BuildLogPath(string today, string timestamp)
+        private string BuildLogPath(string today, string timestamp, int step)
         {
-            return Path.Combine(BaseLogPath, today, $"{today}_{timestamp}.sr");
+            return Path.Combine(BaseLogPath, today, $"{today}_{timestamp}_step_{step}.sr");
         }
 
         private string BuildCommand(string outputPath, int durationMs)
         {
-            return $"-d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -t DET=r -O srzip -o \"{outputPath}\"";
+            //return $"sigrok-cli -d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -t DET=r -O srzip -o \"{outputPath}\"";
+            return $"sigrok-cli -d fx2lafw --config samplerate={SampleRate} --time {durationMs} --channels {Channels} --frames 1 -O srzip -o \"{outputPath}\"";
         }
         ////開始執行擷取
         //public void StartCapture()
@@ -196,46 +193,45 @@ namespace SigrokLogger
         //}
 
         //執行命令的私有方法
-        private CaptureResult ExecuteCommand(string command)
+        private void ExecuteCommand(string command)
         {
-            var processStartInfo = new ProcessStartInfo
+            var processStartInfo = new ProcessStartInfo("cmd.exe")
             {
-                FileName = "sigrok-cli.exe",
-                Arguments = command,
-                WorkingDirectory = SoftwarePath,
+                RedirectStandardInput = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
-                CreateNoWindow = true,
+                CreateNoWindow = false,
+                Arguments = "/k"
             };
 
             using (var process = Process.Start(processStartInfo))
             {
-                // if (process != null)
-                // {
-                //     using (var input = process.StandardInput)
-                //     {
-                //         if (input.BaseStream.CanWrite)
-                //         {
-                //             input.WriteLine($"cd {SoftwarePath}");
-                //             input.WriteLine(command);
-                //             //input.WriteLine("exit");
-                //         }
-                //     }
+                if (process != null)
+                {
+                    using (var input = process.StandardInput)
+                    {
+                        if (input.BaseStream.CanWrite)
+                        {
+                            input.WriteLine($"cd {SoftwarePath}");
+                            input.WriteLine(command);
+                            //input.WriteLine("exit");
+                        }
+                    }
 
-                string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-                return new CaptureResult { LogPath = command, Success = process.ExitCode == 0, ErrorOutput = error };
-                //Console.WriteLine("Output:");
-                //Console.WriteLine(output);
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    //return new CaptureResult { LogPath = command, Success = process.ExitCode == 0, ErrorOutput = error };
+                    //Console.WriteLine("Output:");
+                    //Console.WriteLine(output);
 
-                // if (!string.IsNullOrEmpty(error))
-                // {
-                //     Console.WriteLine("Error:");
-                //     Console.WriteLine(error);
-                // }
-
+                    // if (!string.IsNullOrEmpty(error))
+                    // {
+                    //     Console.WriteLine("Error:");
+                    //     Console.WriteLine(error);
+                    // }
+                }
             };
         }
     }
